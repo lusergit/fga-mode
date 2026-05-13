@@ -54,7 +54,7 @@ Doom files.
 =~/.doom.d/packages.el=
 
 #+begin_src emacs-lisp
-(package! fga-mode :recipe (:local-dir "lisp"))
+(package! fga-mode :recipe (:host github :repo "lusergit/fga-mode"))
 #+end_src
 
 =~/.doom.d/config.el=
