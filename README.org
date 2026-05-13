@@ -1,0 +1,212 @@
+#+title: fga-mode
+#+author: Luca Zaninotto
+#+language: en
+#+options: toc:t num:nil
+
+An Emacs major mode for editing [[https://openfga.dev][OpenFGA]] authorization model files.
+Supports both standard single-file models (~.fga~) and modular models composed
+of multiple files coordinated by a ~fga.mod~ manifest.
+
+#+begin_quote
+*AI disclosure* — this package was generated with the assistance of [[https://claude.ai][Claude]]
+(Anthropic). The generated code has been reviewed for correctness.
+#+end_quote
+
+* Features
+
+- *Syntax highlighting* for the full FGA DSL
+  - Structural keywords: ~model~, ~schema~, ~type~, ~relations~, ~define~,
+    ~condition~, ~extend~
+  - Type names and relation identifiers
+  - Condition names
+  - Boolean and relation-algebra operators: ~or~, ~and~, ~but not~, ~from~, ~with~
+  - Direct type restriction brackets: ~[user]~, ~[group#member]~, ~[org:*]~
+  - Public wildcard ~*~ (highlighted as a warning — wildcard grants are
+    high-impact)
+  - The ~self~ keyword
+  - Line comments (~#~)
+- *~fga.mod~ manifest mode* — dedicated highlighting for the modular model
+  manifest format
+- *Indentation* — three fixed structural levels driven by the DSL grammar,
+  configurable via ~fga-indent-offset~ (default: 2 spaces)
+- *Imenu integration* — jump-to-definition index with separate sections for
+  Types, Conditions, and Relations (~M-x imenu~)
+- *~fga-goto-type~* (~C-c C-t~) — completing-read jump to any type definition
+  in the buffer
+- *~fga-goto-define~* (~C-c C-d~) — completing-read jump to any relation
+  definition in the buffer
+- *Comment toggling* — ~M-;~ or ~C-c C-/~
+- *Outline folding* — each ~type~ / ~condition~ declaration is an outline
+  heading; enable with ~M-x fga-enable-outline~ and fold with ~C-c @~
+
+* Requirements
+
+- Emacs 27.1 or later
+
+* Installation
+
+** Doom Emacs
+
+Add ~fga-mode.el~ to your local packages directory — for example,
+=~/.doom.d/lisp/= — then declare the package and configure the mode in your
+Doom files.
+
+=~/.doom.d/packages.el=
+
+#+begin_src emacs-lisp
+(package! fga-mode :recipe (:local-dir "lisp"))
+#+end_src
+
+=~/.doom.d/config.el=
+
+#+begin_src emacs-lisp
+(use-package! fga-mode
+  :mode ("\\.fga\\'" . fga-mode)
+  :mode ("fga\\.mod\\'" . fga-mod-mode)
+  :config
+  (setq fga-indent-offset 2))
+#+end_src
+
+Run ~doom sync~ after editing these files, then restart Emacs or run
+~M-x doom/reload~.
+
+If you prefer to keep ~fga-mode.el~ outside your Doom directory, adjust
+~:local-dir~ to the absolute path where the file lives.
+
+** Vanilla Emacs (~use-package~)
+
+Place ~fga-mode.el~ somewhere on your ~load-path~, then add to your ~init.el~:
+
+#+begin_src emacs-lisp
+(use-package fga-mode
+  :load-path "/path/to/fga-mode.el"
+  :mode ("\\.fga\\'" . fga-mode)
+  :mode ("fga\\.mod\\'" . fga-mod-mode)
+  :config
+  (setq fga-indent-offset 2))
+#+end_src
+
+** Vanilla Emacs (manual)
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/fga-mode.el")
+(require 'fga-mode)
+#+end_src
+
+File associations for ~.fga~ and ~fga.mod~ are registered automatically when
+the package loads.
+
+* Key bindings
+
+| Key           | Command                     | Description                                   |
+|---------------+-----------------------------+-----------------------------------------------|
+| ~C-c C-t~     | ~fga-goto-type~             | Jump to a type definition (with completion)   |
+| ~C-c C-d~     | ~fga-goto-define~           | Jump to a relation definition (with completion) |
+| ~C-c C-/~     | ~fga-toggle-comment-region~ | Toggle ~#~ comments on the region             |
+| ~M-;~         | ~comment-dwim~              | Toggle comment on line or region              |
+| ~M-x imenu~   | —                           | Browse Types / Conditions / Relations index   |
+
+* Configuration
+
+** Indentation width
+
+#+begin_src emacs-lisp
+(setq fga-indent-offset 4)   ; use 4-space indentation
+#+end_src
+
+The DSL has three structural nesting levels:
+
+| Level | Keyword(s)                                    |
+|-------+-----------------------------------------------|
+|     0 | ~model~, ~type~, ~extend type~, ~condition~   |
+|     1 | ~relations~                                   |
+|     2 | ~define~                                      |
+
+** Outline folding
+
+Activate ~outline-minor-mode~ for folding individual type blocks:
+
+#+begin_example
+M-x fga-enable-outline
+#+end_example
+
+Or enable it automatically for all FGA buffers:
+
+#+begin_src emacs-lisp
+(add-hook 'fga-mode-hook #'fga-enable-outline)
+#+end_src
+
+Relevant outline commands once enabled:
+
+| Key           | Description                      |
+|---------------+----------------------------------|
+| ~C-c @ C-c~   | Hide body below heading at point |
+| ~C-c @ C-e~   | Show body below heading at point |
+| ~C-c @ C-t~   | Hide all bodies in the buffer    |
+| ~C-c @ C-a~   | Show all bodies in the buffer    |
+
+* File formats
+
+** Standard model (~.fga~)
+
+#+begin_src conf
+model schema 1.1
+
+type user
+
+type document relations define owner: [user] define editor: [user] or owner
+  define viewer: [user, group#member] or editor define can_share: owner and
+  editor
+
+condition non_expired(expiry: timestamp) { now < expiry }
+#+end_src
+
+** Modular model (~fga.mod~ + individual ~.fga~ files)
+
+A modular model splits types across multiple files. The manifest lists them:
+
+=fga.mod=
+
+#+begin_src conf
+schema 1.2 module my-app contents: - core.fga - projects.fga - organizations.fga
+#+end_src
+
+Individual module files use ~extend type~ to add relations to types declared in
+other files:
+
+=projects.fga=
+
+#+begin_src conf
+extend type document relations define can_archive: owner
+#+end_src
+
+Opening ~fga.mod~ activates ~fga-mod-mode~ automatically. Opening any of the
+listed ~.fga~ files activates ~fga-mode~.
+
+* Faces
+
+All faces inherit from standard ~font-lock~ faces, so they adapt to your current
+theme automatically. To customise individual faces:
+
+#+begin_src emacs-lisp
+(custom-set-faces '(fga-wildcard-face ((t :foreground "red" :weight bold))))
+#+end_src
+
+| Face                      | Inherits from                  | Applied to                        |
+|---------------------------+--------------------------------+-----------------------------------|
+| ~fga-keyword-face~        | ~font-lock-keyword-face~       | Structural keywords               |
+| ~fga-schema-version-face~ | ~font-lock-constant-face~      | Schema version literal            |
+| ~fga-type-name-face~      | ~font-lock-type-face~          | Type names                        |
+| ~fga-relation-name-face~  | ~font-lock-variable-name-face~ | Relation names in ~define~        |
+| ~fga-condition-name-face~ | ~font-lock-function-name-face~ | Condition names                   |
+| ~fga-operator-face~       | ~font-lock-builtin-face~       | Boolean / relation operators      |
+| ~fga-direct-rel-face~     | ~font-lock-string-face~        | Bracket type restriction contents |
+| ~fga-wildcard-face~       | ~font-lock-warning-face~       | Public wildcard ~*~               |
+| ~fga-self-face~           | ~font-lock-preprocessor-face~  | ~self~ keyword                    |
+| ~fga-module-keyword-face~ | ~font-lock-preprocessor-face~  | ~fga.mod~ manifest keys           |
+| ~fga-comment-face~        | ~font-lock-comment-face~       | Line comments                     |
+
+* License
+
+Distributed under the same terms as Emacs itself (GNU General Public License,
+version 3 or later). See the header of ~fga-mode.el~ for details.
