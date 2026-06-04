@@ -508,78 +508,11 @@ it is the type#relation separator; otherwise it starts a line comment.
 (when (and (fboundp 'treesit-available-p) (treesit-available-p))
   (require 'treesit)
 
-  ;;;;; Font-lock ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-  (defvar fga-ts-font-lock-rules
-    (treesit-font-lock-rules
-
-     :language 'fga
-     :feature 'comment
-     '((comment) @fga-comment-face)
-
-     :language 'fga
-     :feature 'keyword
-     ;; structural keywords — `extend' and `type' appear as separate tokens
-     ;; in `extend type' constructs; both are captured here
-     '(["model" "schema" "type" "relations" "define" "condition" "extend"]
-       @fga-keyword-face)
-
-     :language 'fga
-     :feature 'constant
-     '((version) @fga-schema-version-face)
-
-     :language 'fga
-     :feature 'type
-     ;; type declaration names and condition parameter types
-     '((type_declaration (identifier) @fga-type-name-face)
-       (type_identifier) @fga-type-name-face)
-
-     :language 'fga
-     :feature 'definition
-     ;; relation name on the left-hand side of `define RELATION:'
-     '((definition (identifier) @fga-relation-name-face))
-
-     :language 'fga
-     :feature 'function
-     ;; condition declaration name; method calls in condition bodies
-     '((condition_declaration (identifier) @fga-condition-name-face)
-       (call_expression
-        function: (selector_expression
-                   field: (identifier) @font-lock-function-call-face)))
-
-     :language 'fga
-     :feature 'variable
-     ;; condition parameter names and relation-reference identifiers
-     '((param (identifier) @font-lock-variable-use-face)
-       (indirect_relation (identifier) @font-lock-variable-use-face)
-       (conditional (identifier) @font-lock-variable-use-face))
-
-     :language 'fga
-     :feature 'relation-ref
-     ;; [group#member] — the grammar produces a `relation_ref' node with
-     ;; exactly two (identifier) children separated by "#".  The `#' token
-     ;; is parsed structurally, so it is never mistaken for a comment here.
-     '((relation_ref
-        (identifier) @fga-relation-ref-type-face
-        (identifier) @fga-relation-ref-rel-face))
-
-     :language 'fga
-     :feature 'operator
-     '((operator) @fga-operator-face
-       ["from" "with"] @fga-operator-face)
-
-     :language 'fga
-     :feature 'bracket
-     '(["(" ")" "[" "]" "{" "}"] @font-lock-bracket-face))
-
-    "Tree-sitter font-lock rules for `fga-ts-mode'.")
-
-  ;;;;; Indentation ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;;;; Indentation rules ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
-  ;; The FGA DSL does not use braces for `relations' blocks — nesting is
-  ;; purely whitespace-driven (like Python/YAML).  Condition bodies DO use
-  ;; braces.  The rules below mirror the three-level structure used by
-  ;; `fga--calculate-indent' in the Elisp fallback.
+  ;; Defined as a defvar (not defconst) outside the mode body because it
+  ;; references `fga-indent-offset' at eval time via backquote, which is
+  ;; fine — it's just a number, not a grammar query.
 
   (defvar fga-ts-indent-rules
     `((fga
@@ -636,37 +569,112 @@ Falls back to `fga-mode' when the grammar is not available.
 \\{fga-mode-map}"
     :syntax-table fga-mode-syntax-table
 
-    (unless (treesit-ready-p 'fga)
-      (message "fga-ts-mode: `fga' grammar not found — falling back to fga-mode")
-      (fga-mode)
-      (cl-return-from fga-ts-mode))
+    ;; Guard: fall back to fga-mode if the grammar is absent.
+    ;; We cannot use `cl-return-from' here because `define-derived-mode'
+    ;; does not establish a named block; use a top-level `if' instead.
+    (if (not (treesit-ready-p 'fga))
+        (progn
+          (message "fga-ts-mode: `fga' grammar not found — falling back to fga-mode")
+          (fga-mode))
 
-    (fga--set-common-locals)
-    (treesit-parser-create 'fga)
+      (fga--set-common-locals)
+      (treesit-parser-create 'fga)
 
-    ;; Font-lock
-    (setq-local treesit-font-lock-settings fga-ts-font-lock-rules)
-    (setq-local treesit-font-lock-feature-list
-                '((comment)
-                  (keyword constant)
-                  (type definition function)
-                  (variable relation-ref operator bracket)))
+      ;; Font-lock rules are built here, inside the mode body, not at
+      ;; load time.  `treesit-font-lock-rules' validates node names
+      ;; against the live grammar, so it must run after the parser is
+      ;; created.  Building them here also means re-loading the file
+      ;; after installing the grammar will always pick up a fresh set.
+      ;;
+      ;; Keywords present in the grammar (from tree-sitter-fga grammar.js):
+      ;;   "model"  "schema"  "type"  "relations"  "define"
+      ;;   "condition"  "extend"  "module"
+      ;; `module' is used in module-file declarations (e.g. `module hardware_type').
+      (setq-local treesit-font-lock-settings
+                  (treesit-font-lock-rules
 
-    ;; Indentation
-    (setq-local treesit-simple-indent-rules fga-ts-indent-rules)
-    (setq-local indent-line-function #'treesit-indent)
+                   :language 'fga
+                   :feature 'comment
+                   '((comment) @fga-comment-face)
 
-    ;; Imenu — Types and Conditions via treesit; Relations via fga-goto-define
-    (setq-local treesit-simple-imenu-settings fga-ts-imenu-settings)
-    (setq-local imenu-create-index-function #'treesit-simple-imenu)
+                   :language 'fga
+                   :feature 'keyword
+                   ;; `module' appears in module-file declarations:
+                   ;;   module hardware_type
+                   ;; `extend' and `type' are separate tokens in `extend type'.
+                   '(["model" "schema" "type" "relations" "define"
+                      "condition" "extend" "module"]
+                     @fga-keyword-face)
 
-    ;; which-func / breadcrumb
-    (setq-local treesit-defun-type-regexp
-                (rx (or "type_declaration" "condition_declaration")))
+                   :language 'fga
+                   :feature 'constant
+                   '((version) @fga-schema-version-face)
 
-    (setq-local electric-indent-chars (append ":{}" electric-indent-chars))
+                   :language 'fga
+                   :feature 'type
+                   ;; type declaration names and condition parameter types
+                   '((type_declaration (identifier) @fga-type-name-face)
+                     (type_identifier) @fga-type-name-face)
 
-    (treesit-major-mode-setup))
+                   :language 'fga
+                   :feature 'definition
+                   ;; relation name on the left-hand side of `define RELATION:'
+                   '((definition (identifier) @fga-relation-name-face))
+
+                   :language 'fga
+                   :feature 'function
+                   ;; condition name; method calls in condition bodies
+                   '((condition_declaration (identifier) @fga-condition-name-face)
+                     (call_expression
+                      function: (selector_expression
+                                 field: (identifier) @font-lock-function-call-face)))
+
+                   :language 'fga
+                   :feature 'variable
+                   ;; condition parameter names and relation-reference identifiers
+                   '((param (identifier) @font-lock-variable-use-face)
+                     (indirect_relation (identifier) @font-lock-variable-use-face)
+                     (conditional (identifier) @font-lock-variable-use-face))
+
+                   :language 'fga
+                   :feature 'relation-ref
+                   ;; [group#member] — `relation_ref' node has two (identifier)
+                   ;; children separated by "#".  The grammar knows this is not
+                   ;; a comment, so no syntax-propertize is needed.
+                   '((relation_ref
+                      (identifier) @fga-relation-ref-type-face
+                      (identifier) @fga-relation-ref-rel-face))
+
+                   :language 'fga
+                   :feature 'operator
+                   '((operator) @fga-operator-face
+                     ["from" "with"] @fga-operator-face)
+
+                   :language 'fga
+                   :feature 'bracket
+                   '(["(" ")" "[" "]" "{" "}"] @font-lock-bracket-face)))
+
+      (setq-local treesit-font-lock-feature-list
+                  '((comment)
+                    (keyword constant)
+                    (type definition function)
+                    (variable relation-ref operator bracket)))
+
+      ;; Indentation
+      (setq-local treesit-simple-indent-rules fga-ts-indent-rules)
+      (setq-local indent-line-function #'treesit-indent)
+
+      ;; Imenu — Types and Conditions via treesit; Relations via fga-goto-define
+      (setq-local treesit-simple-imenu-settings fga-ts-imenu-settings)
+      (setq-local imenu-create-index-function #'treesit-simple-imenu)
+
+      ;; which-func / breadcrumb
+      (setq-local treesit-defun-type-regexp
+                  (rx (or "type_declaration" "condition_declaration")))
+
+      (setq-local electric-indent-chars (append ":{}" electric-indent-chars))
+
+      (treesit-major-mode-setup)))
 
   ) ; end (when treesit-available-p ...)
 
